@@ -1,4 +1,4 @@
-use clap::Parser;
+use clap::{ArgGroup, Parser};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Category {
@@ -55,8 +55,59 @@ impl Category {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_all() {
+        assert_eq!(Category::parse_list("all").len(), 11);
+    }
+
+    #[test]
+    fn parse_aliases() {
+        let v = Category::parse_list("db,net,tmp,sec,docker");
+        assert!(v.contains(&Category::Database));
+        assert!(v.contains(&Category::Network));
+        assert!(v.contains(&Category::Temp));
+        assert!(v.contains(&Category::Security));
+        assert!(v.contains(&Category::Container));
+    }
+
+    #[test]
+    fn parse_ignores_unknown() {
+        let v = Category::parse_list("shell,nope,web");
+        assert_eq!(v, vec![Category::Shell, Category::Web]);
+    }
+
+    #[test]
+    fn parse_empty_unknown() {
+        assert!(Category::parse_list("foo,bar").is_empty());
+    }
+}
+
+/// Shell 历史文件名（相对用户家目录），全项目唯一来源。
+#[cfg(unix)]
+pub const HISTORY_FILES: &[&str] = &[
+    ".bash_history",
+    ".zsh_history",
+    ".python_history",
+    ".node_repl_history",
+    ".mysql_history",
+    ".psql_history",
+    ".rediscli_history",
+    ".lesshst",
+    ".viminfo",
+    ".wget-hsts",
+];
+
 #[derive(Parser)]
 #[command(name = "coda", version, about = "入侵痕迹清除工具")]
+#[command(group(
+    ArgGroup::new("mode")
+        .required(true)
+        .args(["delete", "backup", "restore", "selective"])
+))]
 pub struct Cli {
     #[arg(short = 'D', long = "delete", help = "删除全部日志")]
     pub delete: bool,
@@ -82,14 +133,21 @@ pub struct Cli {
     #[arg(long = "truncate", help = "截断文件为零字节而非删除")]
     pub truncate: bool,
 
-    #[arg(long = "timestomp", help = "操作后还原文件时间戳")]
+    #[arg(long = "timestomp", help = "截断后还原文件时间戳")]
     pub timestomp: bool,
+
+    #[arg(long = "aggressive", help = "允许破坏性操作 (断网配置/hidepid/容器运行时目录等)")]
+    pub aggressive: bool,
 
     #[arg(long = "self-destruct", help = "执行完成后删除自身二进制")]
     pub self_destruct: bool,
 
-    #[arg(short = 'c', long = "categories", default_value = "all",
-          help = "清理类别: system,web,db,shell,temp,net,browser,container,audit,sec,mail,all")]
+    #[arg(
+        short = 'c',
+        long = "categories",
+        default_value = "all",
+        help = "清理类别: system,web,db,shell,temp,net,browser,container,audit,sec,mail,all"
+    )]
     pub categories: String,
 
     #[arg(long = "user", help = "选择性清除: 按用户名筛选")]

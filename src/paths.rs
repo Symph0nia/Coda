@@ -1,4 +1,6 @@
 use crate::cli::Category;
+#[cfg(unix)]
+use crate::cli::HISTORY_FILES;
 
 struct CategorizedPath {
     category: Category,
@@ -7,7 +9,10 @@ struct CategorizedPath {
 
 macro_rules! cp {
     ($cat:ident, $path:expr) => {
-        CategorizedPath { category: Category::$cat, path: $path }
+        CategorizedPath {
+            category: Category::$cat,
+            path: $path,
+        }
     };
 }
 
@@ -63,7 +68,7 @@ pub fn log_paths(categories: &[Category]) -> Vec<String> {
         cp!(Mail, "/var/log/mail.log"),
         cp!(Mail, "/var/log/mail.err"),
         cp!(Mail, "/var/log/maillog"),
-        // 容器
+        // 容器日志（运行时目录见 --aggressive）
         cp!(Container, "/var/log/docker.log"),
         cp!(Container, "/var/log/kubernetes/*"),
         cp!(Container, "/var/log/containers/*"),
@@ -75,13 +80,13 @@ pub fn log_paths(categories: &[Category]) -> Vec<String> {
         cp!(Network, "/var/log/rsyncd.log"),
         cp!(Network, "/var/log/openvpn/*"),
         cp!(Network, "/var/log/wireguard/*"),
-        // 包管理器 (归入系统)
+        // 包管理器
         cp!(System, "/var/log/yum.log"),
         cp!(System, "/var/log/apt/history.log"),
         cp!(System, "/var/log/apt/term.log"),
         cp!(System, "/var/log/dnf.log"),
         cp!(System, "/var/log/pacman.log"),
-        // 临时文件
+        // 临时文件（明确选 temp 类别时清理）
         cp!(Temp, "/tmp/*"),
         cp!(Temp, "/var/tmp/*"),
     ];
@@ -92,25 +97,15 @@ pub fn log_paths(categories: &[Category]) -> Vec<String> {
         .map(|cp| cp.path.to_string())
         .collect();
 
-    // Shell 历史 (动态)
     if categories.contains(&Category::Shell) {
-        let history_files = [
-            ".bash_history", ".zsh_history", ".python_history",
-            ".node_repl_history", ".mysql_history", ".psql_history",
-            ".rediscli_history", ".lesshst", ".viminfo", ".wget-hsts",
-        ];
-
-        // root
-        for f in &history_files {
+        for f in HISTORY_FILES {
             paths.push(format!("/root/{}", f));
         }
-
-        // /home/*
         if let Ok(entries) = std::fs::read_dir("/home") {
             for entry in entries.flatten() {
                 if entry.path().is_dir() {
                     let base = entry.path().display().to_string();
-                    for f in &history_files {
+                    for f in HISTORY_FILES {
                         paths.push(format!("{}/{}", base, f));
                     }
                 }
@@ -118,7 +113,6 @@ pub fn log_paths(categories: &[Category]) -> Vec<String> {
         }
     }
 
-    // 浏览器缓存 (Linux)
     if categories.contains(&Category::Browser) {
         if let Ok(entries) = std::fs::read_dir("/home") {
             for entry in entries.flatten() {
@@ -131,6 +125,10 @@ pub fn log_paths(categories: &[Category]) -> Vec<String> {
                 }
             }
         }
+        // root 浏览器
+        paths.push("/root/.cache/mozilla/firefox/*/cache2/*".into());
+        paths.push("/root/.cache/google-chrome/Default/Cache/*".into());
+        paths.push("/root/.mozilla/firefox/*/places.sqlite".into());
     }
 
     paths
@@ -138,36 +136,68 @@ pub fn log_paths(categories: &[Category]) -> Vec<String> {
 
 #[cfg(windows)]
 pub fn log_paths(categories: &[Category]) -> Vec<String> {
-    let username = std::env::var("USERNAME").unwrap_or_default();
-    let user_dir = format!(r"C:\Users\{}", username);
-
     let all: Vec<CategorizedPath> = vec![
-        // 系统事件日志
         cp!(System, r"C:\Windows\System32\winevt\Logs\Security.evtx"),
         cp!(System, r"C:\Windows\System32\winevt\Logs\Application.evtx"),
         cp!(System, r"C:\Windows\System32\winevt\Logs\System.evtx"),
         cp!(System, r"C:\Windows\System32\winevt\Logs\Setup.evtx"),
-        cp!(Audit, r"C:\Windows\System32\winevt\Logs\Microsoft-Windows-Security-Auditing.evtx"),
-        cp!(System, r"C:\Windows\System32\winevt\Logs\Microsoft-Windows-User Profile Service%4Operational.evtx"),
-        cp!(Network, r"C:\Windows\System32\winevt\Logs\Microsoft-Windows-DNS-Client%4Operational.evtx"),
-        cp!(Network, r"C:\Windows\System32\winevt\Logs\Microsoft-Windows-DNS-Server%4Analytical.evtx"),
-        cp!(Network, r"C:\Windows\System32\winevt\Logs\Microsoft-Windows-Windows Firewall With Advanced Security%4Firewall.evtx"),
-        cp!(System, r"C:\Windows\System32\winevt\Logs\Microsoft-Windows-TaskScheduler%4Operational.evtx"),
-        cp!(Network, r"C:\Windows\System32\winevt\Logs\Microsoft-Windows-SMBClient\Operational.evtx"),
-        cp!(Network, r"C:\Windows\System32\winevt\Logs\Microsoft-Windows-RemoteDesktopServices-RdpCoreTS\Operational.evtx"),
-        cp!(Network, r"C:\Windows\System32\winevt\Logs\Microsoft-Windows-TerminalServices-LocalSessionManager\Operational.evtx"),
-        cp!(Security, r"C:\Windows\System32\winevt\Logs\Microsoft-Windows-Windows Defender\Operational.evtx"),
-        cp!(System, r"C:\Windows\System32\winevt\Logs\Microsoft-Windows-Sysmon\Operational.evtx"),
-        // 防火墙 & HTTP 日志
+        cp!(
+            Audit,
+            r"C:\Windows\System32\winevt\Logs\Microsoft-Windows-Security-Auditing.evtx"
+        ),
+        cp!(
+            System,
+            r"C:\Windows\System32\winevt\Logs\Microsoft-Windows-User Profile Service%4Operational.evtx"
+        ),
+        cp!(
+            Network,
+            r"C:\Windows\System32\winevt\Logs\Microsoft-Windows-DNS-Client%4Operational.evtx"
+        ),
+        cp!(
+            Network,
+            r"C:\Windows\System32\winevt\Logs\Microsoft-Windows-DNS-Server%4Analytical.evtx"
+        ),
+        cp!(
+            Network,
+            r"C:\Windows\System32\winevt\Logs\Microsoft-Windows-Windows Firewall With Advanced Security%4Firewall.evtx"
+        ),
+        cp!(
+            System,
+            r"C:\Windows\System32\winevt\Logs\Microsoft-Windows-TaskScheduler%4Operational.evtx"
+        ),
+        cp!(
+            Network,
+            r"C:\Windows\System32\winevt\Logs\Microsoft-Windows-SMBClient\Operational.evtx"
+        ),
+        cp!(
+            Network,
+            r"C:\Windows\System32\winevt\Logs\Microsoft-Windows-RemoteDesktopServices-RdpCoreTS\Operational.evtx"
+        ),
+        cp!(
+            Network,
+            r"C:\Windows\System32\winevt\Logs\Microsoft-Windows-TerminalServices-LocalSessionManager\Operational.evtx"
+        ),
+        cp!(
+            Security,
+            r"C:\Windows\System32\winevt\Logs\Microsoft-Windows-Windows Defender\Operational.evtx"
+        ),
+        cp!(
+            System,
+            r"C:\Windows\System32\winevt\Logs\Microsoft-Windows-Sysmon\Operational.evtx"
+        ),
         cp!(Network, r"C:\Windows\System32\LogFiles\Firewall\pfirewall.log"),
         cp!(Web, r"C:\Windows\System32\LogFiles\HTTPERR\httperr1.log"),
         cp!(Web, r"C:\Windows\System32\LogFiles\W3SVC1\*"),
-        // IIS
         cp!(Web, r"C:\inetpub\logs\LogFiles\W3SVC1\*"),
         cp!(Web, r"C:\inetpub\logs\FailedReqLogFiles\*"),
-        // Apache
-        cp!(Web, r"C:\Program Files\Apache Group\Apache2\logs\access.log"),
-        cp!(Web, r"C:\Program Files\Apache Group\Apache2\logs\error.log"),
+        cp!(
+            Web,
+            r"C:\Program Files\Apache Group\Apache2\logs\access.log"
+        ),
+        cp!(
+            Web,
+            r"C:\Program Files\Apache Group\Apache2\logs\error.log"
+        ),
         cp!(Web, r"C:\Program Files (x86)\IIS Express\Logs\IISExpress.log"),
     ];
 
@@ -177,39 +207,88 @@ pub fn log_paths(categories: &[Category]) -> Vec<String> {
         .map(|cp| cp.path.to_string())
         .collect();
 
-    // 临时文件
     if categories.contains(&Category::Temp) {
         paths.push(r"C:\Windows\Temp\*".into());
-        paths.push(format!(r"{}\AppData\Local\Temp\*", user_dir));
-        paths.push(format!(r"{}\AppData\LocalLow\Temp\*", user_dir));
+        for user_dir in windows_user_dirs() {
+            paths.push(format!(r"{}\AppData\Local\Temp\*", user_dir));
+            paths.push(format!(r"{}\AppData\LocalLow\Temp\*", user_dir));
+        }
     }
 
-    // 用户痕迹/浏览器
-    if categories.contains(&Category::Browser) {
-        paths.push(format!(r"{}\AppData\Roaming\Microsoft\Windows\Recent\*", user_dir));
-        paths.push(format!(r"{}\AppData\Local\Microsoft\Windows\INetCache\*", user_dir));
-        paths.push(format!(r"{}\AppData\Local\Microsoft\Windows\History\*", user_dir));
+    if categories.contains(&Category::Shell) {
+        for user_dir in windows_user_dirs() {
+            paths.push(format!(
+                r"{}\AppData\Roaming\Microsoft\Windows\PowerShell\PSReadLine\ConsoleHost_history.txt",
+                user_dir
+            ));
+        }
+    }
 
-        // Firefox
-        let firefox_profiles = format!(r"{}\AppData\Local\Mozilla\Firefox\Profiles", user_dir);
-        if let Ok(entries) = std::fs::read_dir(&firefox_profiles) {
-            for entry in entries.flatten() {
-                if entry.path().is_dir() {
-                    let base = entry.path().display().to_string();
-                    paths.push(format!(r"{}\cache2", base));
-                    paths.push(format!(r"{}\places.sqlite", base));
+    if categories.contains(&Category::Browser) {
+        for user_dir in windows_user_dirs() {
+            paths.push(format!(
+                r"{}\AppData\Roaming\Microsoft\Windows\Recent\*",
+                user_dir
+            ));
+            paths.push(format!(
+                r"{}\AppData\Local\Microsoft\Windows\INetCache\*",
+                user_dir
+            ));
+            paths.push(format!(
+                r"{}\AppData\Local\Microsoft\Windows\History\*",
+                user_dir
+            ));
+
+            let firefox_profiles =
+                format!(r"{}\AppData\Local\Mozilla\Firefox\Profiles", user_dir);
+            if let Ok(entries) = std::fs::read_dir(&firefox_profiles) {
+                for entry in entries.flatten() {
+                    if entry.path().is_dir() {
+                        let base = entry.path().display().to_string();
+                        paths.push(format!(r"{}\cache2", base));
+                        paths.push(format!(r"{}\places.sqlite", base));
+                    }
                 }
             }
+
+            paths.push(format!(
+                r"{}\AppData\Local\Google\Chrome\User Data\Default\Cache\*",
+                user_dir
+            ));
+            paths.push(format!(
+                r"{}\AppData\Local\Microsoft\Edge\User Data\Default\Cache\*",
+                user_dir
+            ));
         }
-
-        // Chrome
-        let chrome_cache = format!(r"{}\AppData\Local\Google\Chrome\User Data\Default\Cache", user_dir);
-        paths.push(format!(r"{}\*", chrome_cache));
-
-        // Edge
-        let edge_cache = format!(r"{}\AppData\Local\Microsoft\Edge\User Data\Default\Cache", user_dir);
-        paths.push(format!(r"{}\*", edge_cache));
     }
 
     paths
+}
+
+#[cfg(windows)]
+fn windows_user_dirs() -> Vec<String> {
+    let mut dirs = Vec::new();
+    let users = std::path::Path::new(r"C:\Users");
+    if let Ok(entries) = std::fs::read_dir(users) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.eq_ignore_ascii_case("Public")
+                || name.eq_ignore_ascii_case("Default")
+                || name.eq_ignore_ascii_case("Default User")
+                || name.eq_ignore_ascii_case("All Users")
+            {
+                continue;
+            }
+            if entry.path().is_dir() {
+                dirs.push(entry.path().display().to_string());
+            }
+        }
+    }
+    if dirs.is_empty() {
+        if let Ok(p) = std::env::var("USERPROFILE") {
+            dirs.push(p);
+        }
+    }
+    dirs
 }

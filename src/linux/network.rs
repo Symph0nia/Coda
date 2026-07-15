@@ -4,21 +4,46 @@ use std::path::Path;
 pub fn clean_network_traces(ctx: &Context) {
     ctx.info("清理网络痕迹...");
 
-    // ARP 缓存
     ctx.run_cmd("清空 ARP 缓存", "ip", &["neigh", "flush", "all"]);
 
-    // DNS 缓存 (systemd-resolved)
-    ctx.run_cmd("清空 DNS 缓存", "systemd-resolve", &["--flush-caches"]);
+    // resolvectl 优先，回退 systemd-resolve
+    ctx.run_cmd_fallback(
+        "清空 DNS 缓存",
+        &[
+            ("resolvectl", &["flush-caches"]),
+            ("systemd-resolve", &["--flush-caches"]),
+        ],
+    );
 
-    // NetworkManager 连接记录
-    let nm_paths = [
-        "/etc/NetworkManager/system-connections",
-        "/var/lib/NetworkManager",
-    ];
-    for p in &nm_paths {
-        let path = Path::new(p);
-        if path.exists() && path.is_dir() {
-            if let Ok(entries) = std::fs::read_dir(path) {
+    // NetworkManager 状态/租约类痕迹（不断网）
+    let nm_state = Path::new("/var/lib/NetworkManager");
+    if nm_state.exists() && nm_state.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(nm_state) {
+            for entry in entries.flatten() {
+                let ep = entry.path();
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                // 只清租约/时间戳类，不动设备状态核心
+                if name.ends_with(".lease")
+                    || name.ends_with(".leases")
+                    || name == "timestamps"
+                    || name.starts_with("dhclient-")
+                    || name.starts_with("secret_key")
+                {
+                    if ep.is_file() {
+                        ctx.remove(&ep);
+                    }
+                }
+            }
+        }
+    }
+
+    // 连接配置会断网 — 仅 aggressive
+    if ctx.aggressive {
+        ctx.info("aggressive: 清理 NetworkManager 连接配置...");
+        let nm_conn = Path::new("/etc/NetworkManager/system-connections");
+        if nm_conn.exists() && nm_conn.is_dir() {
+            if let Ok(entries) = std::fs::read_dir(nm_conn) {
                 for entry in entries.flatten() {
                     let ep = entry.path();
                     if ep.is_file() {
@@ -43,67 +68,21 @@ pub fn clean_network_traces(ctx: &Context) {
     }
 }
 
+/// 仅清理当前会话历史变量；历史文件由 paths 统一收集删除。
 pub fn clean_shell_env(ctx: &Context) {
-    ctx.info("清理 Shell 环境与历史...");
-
-    // 当前会话的环境变量清理通过执行 shell 命令
+    ctx.info("清理当前 Shell 会话历史...");
     ctx.run_cmd(
         "清除当前会话历史",
         "bash",
-        &["-c", "unset HISTFILE; export HISTSIZE=0; history -c; history -w 2>/dev/null || true"],
+        &[
+            "-c",
+            "unset HISTFILE; export HISTSIZE=0; history -c; history -w 2>/dev/null || true",
+        ],
     );
-
-    // 所有用户的 shell 历史文件
-    let history_patterns = [
-        "/root/.bash_history",
-        "/root/.zsh_history",
-        "/root/.python_history",
-        "/root/.node_repl_history",
-        "/root/.mysql_history",
-        "/root/.psql_history",
-        "/root/.rediscli_history",
-        "/root/.lesshst",
-        "/root/.viminfo",
-    ];
-
-    for p in &history_patterns {
-        let path = Path::new(p);
-        if path.exists() {
-            ctx.remove(path);
-        }
-    }
-
-    // /home 下所有用户
-    if let Ok(entries) = std::fs::read_dir("/home") {
-        for entry in entries.flatten() {
-            if !entry.path().is_dir() {
-                continue;
-            }
-            let home = entry.path();
-            let history_files = [
-                ".bash_history",
-                ".zsh_history",
-                ".python_history",
-                ".node_repl_history",
-                ".mysql_history",
-                ".psql_history",
-                ".rediscli_history",
-                ".lesshst",
-                ".viminfo",
-                ".wget-hsts",
-            ];
-            for f in &history_files {
-                let p = home.join(f);
-                if p.exists() {
-                    ctx.remove(&p);
-                }
-            }
-        }
-    }
 }
 
 pub fn hide_process(ctx: &Context) {
-    ctx.info("隐藏 /proc 进程信息...");
+    ctx.info("隐藏 /proc 进程信息 (aggressive)...");
     ctx.run_cmd(
         "设置 hidepid=2",
         "mount",
@@ -114,38 +93,29 @@ pub fn hide_process(ctx: &Context) {
 pub fn clean_container_traces(ctx: &Context) {
     ctx.info("清理容器痕迹...");
 
-    // Docker
-    let docker_paths = [
-        "/var/lib/docker/containers",
-        "/var/log/docker.log",
-    ];
-    for p in &docker_paths {
-        let path = Path::new(p);
-        if path.exists() {
-            ctx.remove(path);
-        }
-    }
-
-    // Kubernetes
-    let k8s_paths = [
-        "/var/log/kubernetes",
-        "/var/log/containers",
-        "/var/log/pods",
-    ];
-    for p in &k8s_paths {
-        let path = Path::new(p);
-        if path.exists() {
-            ctx.remove(path);
-        }
-    }
-
-    // Podman
-    if let Ok(entries) = std::fs::read_dir("/run/user") {
-        for entry in entries.flatten() {
-            let containers = entry.path().join("containers");
-            if containers.exists() {
-                ctx.remove(&containers);
+    // 日志路径已由 paths 处理；此处只处理额外运行时状态
+    if ctx.aggressive {
+        ctx.info("aggressive: 清理容器运行时目录...");
+        let runtime_paths = [
+            "/var/lib/docker/containers",
+            "/var/lib/containerd",
+        ];
+        for p in &runtime_paths {
+            let path = Path::new(p);
+            if path.exists() {
+                ctx.remove(path);
             }
         }
+
+        if let Ok(entries) = std::fs::read_dir("/run/user") {
+            for entry in entries.flatten() {
+                let containers = entry.path().join("containers");
+                if containers.exists() {
+                    ctx.remove(&containers);
+                }
+            }
+        }
+    } else {
+        ctx.info("跳过容器运行时目录 (需要 --aggressive)");
     }
 }

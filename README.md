@@ -65,10 +65,13 @@ coda -D -c system,shell,web
 # 安全覆写删除（3轮随机+零填充）
 coda -D --shred
 
-# 截断模式（文件清零但保留）
-coda -D --truncate
+# 截断模式（文件清零但保留；可配合 --timestomp 还原时间戳）
+coda -D --truncate --timestomp
 
-# 选择性清除：精确删除指定用户的登录记录
+# 破坏性操作（NM 连接配置 / hidepid / 容器运行时 / VSS 等）
+coda -D --aggressive
+
+# 选择性清除：utmp/wtmp/lastlog + auth.log/secure 行级过滤
 coda -S --user attacker
 coda -S --ip 192.168.1.100
 coda -S --user attacker --ip 10.0.0.1

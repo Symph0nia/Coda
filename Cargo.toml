@@ -1,6 +1,6 @@
 [package]
 name = "coda"
-version = "0.2.0"
+version = "0.2.2"
 edition = "2024"
 
 [dependencies]
@@ -10,6 +10,3 @@ rand = "0.9"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
-
-[target.'cfg(windows)'.dependencies]
-winreg = "0.55"

@@ -3,7 +3,6 @@ use crate::common::Context;
 pub fn clean_all_event_logs(ctx: &Context) {
     ctx.info("清除 Windows 事件日志...");
 
-    // 枚举所有 event log channel 并逐个清除
     let output = match std::process::Command::new("wevtutil").arg("el").output() {
         Ok(o) if o.status.success() => o,
         _ => {
