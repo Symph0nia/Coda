@@ -1,0 +1,15 @@
+[package]
+name = "coda"
+version = "0.2.0"
+edition = "2024"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+glob = "0.3"
+rand = "0.9"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.55"
